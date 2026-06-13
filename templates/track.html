@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Redirecting...</title>
+</head>
+<body>
+  <h2>Getting your location...</h2>
+  <p>Please allow location access.</p>
+
+  <script>
+    const shortCode = "{{ short_code }}";
+
+    function redirectNow() {
+      window.location.href = `/redirect/${shortCode}`;
+    }
+
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        async (position) => {
+          const { latitude, longitude, accuracy } = position.coords;
+          
+          // Log GPS (non-blocking)
+          await fetch(`/api/track/${shortCode}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ latitude, longitude, accuracy })
+          }).catch(() => {}); // Don't fail if logging fails
+
+          redirectNow();
+        },
+        (error) => {
+          console.error("Geolocation error:", error);
+          redirectNow(); // Redirect even if location denied
+        }
+      );
+    } else {
+      redirectNow();
+    }
+  </script>
+</body>
+</html>

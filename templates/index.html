@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GPS Link Shortener</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
+    input { width: 100%; padding: 12px; margin: 10px 0; }
+    button { padding: 12px 20px; background: #0066ff; color: white; border: none; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <h1>GPS Link Shortener</h1>
+  <input type="url" id="urlInput" placeholder="https://your-destination.com" required>
+  <button onclick="shortenLink()">Create Short Link</button>
+  <div id="result" style="margin-top: 20px;"></div>
+
+  <script>
+    async function shortenLink() {
+      const url = document.getElementById('urlInput').value;
+      if (!url) return alert("Please enter a URL");
+
+      const res = await fetch('/api/shorten', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({original_url: url})
+      });
+      
+      const data = await res.json();
+      document.getElementById('result').innerHTML = `
+        <strong>Short Link:</strong><br>
+        <a href="${data.short_url}" target="_blank">${data.short_url}</a>
+      `;
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Logs - {{ short_code }}</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+    th, td { border: 1px solid #ccc; padding: 10px; text-align: left; }
+    th { background: #f0f0f0; }
+    .map { height: 500px; width: 100%; margin: 20px 0; border: 1px solid #ddd; }
+  </style>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+<body>
+  <h1>Tracking Logs for: <code>{{ short_code }}</code></h1>
+  <a href="/">← Back to Home</a>
+
+  <div id="map" class="map"></div>
+
+  <h2>All Location Logs</h2>
+  <table id="logsTable">
+    <thead>
+      <tr>
+        <th>Time</th>
+        <th>Latitude</th>
+        <th>Longitude</th>
+        <th>Accuracy (m)</th>
+        <th>IP Address</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <script>
+    const shortCode = "{{ short_code }}";
+
+    fetch(`/api/logs/${shortCode}`)
+      .then(res => res.json())
+      .then(logs => {
+        const tbody = document.querySelector('#logsTable tbody');
+        const map = L.map('map').setView([0, 0], 2);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+        let bounds = [];
+
+        logs.forEach(log => {
+          // Add row to table
+          const row = document.createElement('tr');
+          row.innerHTML = `
+            <td>${log.time}</td>
+            <td>${log.lat}</td>
+            <td>${log.lng}</td>
+            <td>${log.accuracy || 'N/A'}</td>
+            <td>${log.ip}</td>
+          `;
+          tbody.appendChild(row);
+
+          // Add marker to map
+          if (log.lat && log.lng) {
+            const marker = L.marker([log.lat, log.lng]).addTo(map);
+            marker.bindPopup(`<b>${log.time}</b><br>Accuracy: ${log.accuracy}m<br>IP: ${log.ip}`);
+            bounds.push([log.lat, log.lng]);
+          }
+        });
+
+        if (bounds.length > 0) {
+          map.fitBounds(bounds);
+        } else {
+          document.getElementById('map').innerHTML = "<p>No GPS data yet.</p>";
+        }
+      })
+      .catch(err => console.error(err));
+  </script>
+</body>
+</html>
