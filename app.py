@@ -15,14 +15,13 @@ def init_db(force_reset=False):
     if force_reset and os.path.exists(DB_NAME):
         try:
             os.remove(DB_NAME)
-            logging.info("Old database deleted and recreated")
+            logging.info("Old database deleted")
         except:
             pass
-    
+
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     
-    # Drop existing tables if force reset
     if force_reset:
         c.execute('DROP TABLE IF EXISTS links')
         c.execute('DROP TABLE IF EXISTS logs')
@@ -51,8 +50,8 @@ def init_db(force_reset=False):
     conn.commit()
     conn.close()
 
-# Initialize database (with reset option)
-init_db(force_reset=False)   # Change to True if you want to force reset on every start
+# Initialize DB (set to True only when you want to reset everything)
+init_db(force_reset=False)
 
 # ====================== ROUTES ======================
 
@@ -60,7 +59,6 @@ init_db(force_reset=False)   # Change to True if you want to force reset on ever
 def home():
     return render_template('index.html')
 
-# Create short link
 @app.route('/api/shorten', methods=['POST'])
 def shorten():
     data = request.get_json()
@@ -78,13 +76,11 @@ def shorten():
             c.execute('INSERT INTO links (id, original_url, short_code) VALUES (?, ?, ?)',
                       (str(uuid.uuid4()), original_url, short_code))
             conn.commit()
-            
             short_url = f"{request.host_url.rstrip('/')}/{short_code}"
             conn.close()
             return jsonify({'short_url': short_url, 'short_code': short_code})
         except sqlite3.IntegrityError:
             continue
-    
     conn.close()
     return jsonify({'error': 'Failed to create unique short code'}), 500
 
@@ -132,9 +128,8 @@ def final_redirect(short_code):
     
     if result:
         return redirect(result[0])
-    return f"Link not found", 404
+    return "Link not found", 404
 
-# Logs pages
 @app.route('/logs/<short_code>')
 def logs_page(short_code):
     return render_template('logs.html', short_code=short_code.lower())
@@ -144,7 +139,12 @@ def get_logs(short_code):
     short_code = short_code.strip().lower()
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute('SELECT latitude, longitude, accuracy, timestamp, ip, user_agent FROM logs WHERE short_code = ? ORDER BY timestamp DESC', (short_code,))
+    c.execute('''
+        SELECT latitude, longitude, accuracy, timestamp, ip, user_agent 
+        FROM logs 
+        WHERE short_code = ? 
+        ORDER BY timestamp DESC
+    ''', (short_code,))
     logs = c.fetchall()
     conn.close()
     
@@ -153,11 +153,11 @@ def get_logs(short_code):
         'time': row[3], 'ip': row[4], 'user_agent': row[5]
     } for row in logs])
 
-# ====================== ADMIN RESET ======================
+# Reset Database
 @app.route('/admin/reset-db')
 def reset_database():
     init_db(force_reset=True)
-    return "Database has been reset successfully! <a href='/'>Go Home</a>"
+    return "✅ Database reset successfully!<br><a href='/'>Go to Home</a>"
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
