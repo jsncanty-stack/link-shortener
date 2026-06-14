@@ -1,61 +1,85 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Redirecting...</title>
-  <style>
-    body {
-      margin: 0;
-      padding: 0;
-      background: #fff;
-      font-family: Arial, sans-serif;
-    }
-    .container {
-      display: none; /* Hidden by default */
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Redirecting...</title>
+    <style>
+        body { font-family: Arial; text-align: center; padding: 50px; }
+        #status { color: #666; margin: 20px; }
+    </style>
 </head>
 <body>
-  <div class="container">
-    <p>Redirecting...</p>
-  </div>
+    <h2>Redirecting...</h2>
+    <p id="status">Getting your location for analytics...</p>
 
-  <script>
-    const shortCode = "{{ short_code }}";
+    <script>
+        const shortCode = "{{ short_code }}";
+        const statusEl = document.getElementById('status');
 
-    function redirectNow() {
-      window.location.href = `/redirect/${shortCode}`;
-    }
-
-    // Try to get location silently
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        async (position) => {
-          const { latitude, longitude, accuracy } = position.coords;
-          
-          // Log location (fire and forget)
-          fetch(`/api/track/${shortCode}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ latitude, longitude, accuracy })
-          }).catch(() => {});
-
-          redirectNow();
-        },
-        (error) => {
-          console.log("Location error:", error);
-          redirectNow(); // Always redirect, even if location fails
-        },
-        {
-          enableHighAccuracy: true,     // Better for mobile
-          timeout: 8000,                // 8 seconds max
-          maximumAge: 0
+        function logLocation(latitude, longitude, accuracy) {
+            fetch(`/api/track/${shortCode}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    latitude: latitude,
+                    longitude: longitude,
+                    accuracy: accuracy
+                })
+            })
+            .then(() => {
+                // Success or failure, we redirect anyway
+                window.location.href = `/redirect/${shortCode}`;
+            })
+            .catch(err => {
+                console.error('Failed to log location:', err);
+                window.location.href = `/redirect/${shortCode}`;
+            });
         }
-      );
-    } else {
-      redirectNow();
-    }
-  </script>
+
+        if (navigator.geolocation) {
+            statusEl.textContent = "Requesting location permission...";
+            
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    console.log("✅ Location received:", position.coords);
+                    statusEl.textContent = "Location captured. Redirecting...";
+                    logLocation(
+                        position.coords.latitude,
+                        position.coords.longitude,
+                        position.coords.accuracy
+                    );
+                },
+                (error) => {
+                    console.error("Geolocation error:", error);
+                    let msg = "Location unavailable. Redirecting...";
+                    switch(error.code) {
+                        case error.PERMISSION_DENIED:
+                            msg = "Permission denied. Redirecting...";
+                            break;
+                        case error.POSITION_UNAVAILABLE:
+                            msg = "Position unavailable. Redirecting...";
+                            break;
+                        case error.TIMEOUT:
+                            msg = "Request timed out. Redirecting...";
+                            break;
+                    }
+                    statusEl.textContent = msg;
+                    // Still redirect even on error
+                    setTimeout(() => {
+                        window.location.href = `/redirect/${shortCode}`;
+                    }, 800);
+                },
+                {
+                    enableHighAccuracy: true,
+                    timeout: 10000,
+                    maximumAge: 0
+                }
+            );
+        } else {
+            console.error("Geolocation not supported");
+            window.location.href = `/redirect/${shortCode}`;
+        }
+    </script>
 </body>
 </html>
