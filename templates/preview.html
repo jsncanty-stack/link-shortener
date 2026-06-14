@@ -4,21 +4,29 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
-    <!-- Open Graph / Social Media Preview -->
+    <!-- Open Graph Meta Tags -->
     <meta property="og:url" content="{{ original_url }}">
-    <meta property="og:title" content="Redirecting...">
-    <meta property="og:description" content="Click to visit the destination">
+    <meta property="og:title" content="{{ title }}">
+    <meta property="og:description" content="{{ description }}">
+    {% if image %}
+    <meta property="og:image" content="{{ image }}">
+    {% endif %}
     <meta property="og:type" content="website">
-    
-    <!-- Twitter Card -->
+
+    <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{{ title }}">
+    <meta name="twitter:description" content="{{ description }}">
+    {% if image %}
+    <meta name="twitter:image" content="{{ image }}">
+    {% endif %}
+
+    <title>{{ title }}</title>
     
-    <!-- Fallback redirect for bots that don't respect meta tags -->
+    <!-- Instant redirect for bots -->
     <meta http-equiv="refresh" content="0; url={{ original_url }}">
-    
-    <title>Redirecting...</title>
 </head>
 <body>
-    <p>Redirecting to destination...</p>
+    <p>Redirecting to {{ title }}...</p>
 </body>
 </html>
